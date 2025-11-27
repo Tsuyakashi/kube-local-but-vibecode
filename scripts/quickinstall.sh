@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -e
+set -o pipefail
 
 # Configuration variables
 VM_NAME=ubuntu-noble
@@ -169,6 +170,44 @@ function connectWithSSH() {
             "tail -50 /tmp/k8s-install.log 2>/dev/null || echo 'Log file not found'" || true
         exit 1
     }
+    
+    # Копирование kubeconfig на хост для доступа извне
+    echo ""
+    echo "Copying kubeconfig to host for external access..."
+    mkdir -p "$PROJECT_ROOT/data/kubeconfig"
+    
+    # Ждем немного, чтобы убедиться что kubeconfig создан
+    sleep 2
+    
+    scp -i "$PROJECT_ROOT/data/keys/rsa.key" \
+        -o StrictHostKeyChecking=accept-new \
+        -o ConnectTimeout=10 \
+        "ubuntu@${VM_IP}:/home/ubuntu/.kube/config" \
+        "$PROJECT_ROOT/data/kubeconfig/config" 2>/dev/null || {
+        echo "Warning: Failed to copy kubeconfig from VM"
+        echo "You can copy it manually:"
+        echo "  scp -i data/keys/rsa.key ubuntu@${VM_IP}:~/.kube/config data/kubeconfig/config"
+    }
+    
+    if [ -f "$PROJECT_ROOT/data/kubeconfig/config" ]; then
+        # Обновляем IP адрес в kubeconfig для доступа с хоста
+        # Заменяем localhost/127.0.0.1 на реальный IP VM
+        if [ -n "$VM_IP" ]; then
+            sed -i.bak "s|server: https://127.0.0.1:6443|server: https://${VM_IP}:6443|g" "$PROJECT_ROOT/data/kubeconfig/config" 2>/dev/null || true
+            sed -i.bak "s|server: https://localhost:6443|server: https://${VM_IP}:6443|g" "$PROJECT_ROOT/data/kubeconfig/config" 2>/dev/null || true
+            rm -f "$PROJECT_ROOT/data/kubeconfig/config.bak" 2>/dev/null || true
+        fi
+        
+        echo "✓ kubeconfig copied to $PROJECT_ROOT/data/kubeconfig/config"
+        echo ""
+        echo "To use kubectl from host:"
+        echo "  export KUBECONFIG=$PROJECT_ROOT/data/kubeconfig/config"
+        echo "  kubectl get nodes"
+        echo ""
+        echo "Or copy to default location:"
+        echo "  mkdir -p ~/.kube"
+        echo "  cp $PROJECT_ROOT/data/kubeconfig/config ~/.kube/config"
+    fi
 }
 
 # Main execution

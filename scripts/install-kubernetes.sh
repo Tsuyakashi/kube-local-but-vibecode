@@ -4,6 +4,7 @@
 # Запускается внутри VM, созданной kvm-install.sh
 
 set -e
+set -o pipefail
 
 # Проверка прав root
 if [ "${EUID}" -ne 0 ]; then
@@ -22,7 +23,16 @@ source ./variables.sh
 
 # Определение текущего хоста и IP
 thisHostname=$(hostname)
-thisIP=$(hostname -I | awk '{print $1}')
+# Используем hostname -I для получения всех IP, берем первый не-loopback
+thisIP=$(hostname -I | awk '{for(i=1;i<=NF;i++) if($i !~ /^127\./) {print $i; exit}}')
+# Fallback если не нашли не-loopback IP
+if [ -z "$thisIP" ]; then
+    thisIP=$(hostname -I | awk '{print $1}')
+fi
+# Если все еще пусто, используем hostname -i
+if [ -z "$thisIP" ]; then
+    thisIP=$(hostname -i 2>/dev/null || echo "127.0.0.1")
+fi
 
 echo "=========================================="
 echo "Kubernetes Cluster Installation"
@@ -340,20 +350,59 @@ function installKubernetes() {
         K8S_VERSION="${K8S_MAJOR}.${K8S_MINOR}"
         
         # Загружаем GPG ключ нового репозитория
-        # Используем -f для автоматической перезаписи существующего файла
-        if curl -fsSL "https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION}/deb/Release.key" | gpg --dearmor -f -o /usr/share/keyrings/kubernetes-apt-keyring.gpg 2>/dev/null; then
-            echo "✓ GPG key added for Kubernetes ${K8S_VERSION}"
-            echo "deb [signed-by=/usr/share/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION}/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
-        # Fallback: используем последнюю стабильную версию
-        elif curl -fsSL "https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key" | gpg --dearmor -f -o /usr/share/keyrings/kubernetes-apt-keyring.gpg 2>/dev/null; then
-            echo "✓ GPG key added for Kubernetes 1.28 (fallback)"
-            echo "deb [signed-by=/usr/share/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
-        # Последний fallback: старый метод (может не работать)
-        elif curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -f -o /usr/share/keyrings/kubernetes-archive-keyring.gpg 2>/dev/null; then
-            echo "Warning: Using legacy repository (may not work)"
-            echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" > /etc/apt/sources.list.d/kubernetes.list
-        else
+        GPG_KEY_ADDED=false
+        GPG_KEY_FILE="/usr/share/keyrings/kubernetes-apt-keyring.gpg"
+        
+        # Попытка 1: pkgs.k8s.io для указанной версии
+        if curl -fsSL "https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION}/deb/Release.key" -o /tmp/k8s-release.key 2>/dev/null; then
+            if gpg --dearmor < /tmp/k8s-release.key > "$GPG_KEY_FILE" 2>/dev/null; then
+                echo "✓ GPG key added for Kubernetes ${K8S_VERSION}"
+                echo "deb [signed-by=${GPG_KEY_FILE}] https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION}/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
+                GPG_KEY_ADDED=true
+                rm -f /tmp/k8s-release.key
+            fi
+        fi
+        
+        # Попытка 2: pkgs.k8s.io для версии 1.28 (fallback)
+        if [ "$GPG_KEY_ADDED" != true ] && curl -fsSL "https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key" -o /tmp/k8s-release.key 2>/dev/null; then
+            if gpg --dearmor < /tmp/k8s-release.key > "$GPG_KEY_FILE" 2>/dev/null; then
+                echo "✓ GPG key added for Kubernetes 1.28 (fallback)"
+                echo "deb [signed-by=${GPG_KEY_FILE}] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
+                GPG_KEY_ADDED=true
+                rm -f /tmp/k8s-release.key
+            fi
+        fi
+        
+        # Попытка 3: pkgs.k8s.io без версии (latest)
+        if [ "$GPG_KEY_ADDED" != true ] && curl -fsSL "https://pkgs.k8s.io/core:/stable:/deb/Release.key" -o /tmp/k8s-release.key 2>/dev/null; then
+            if gpg --dearmor < /tmp/k8s-release.key > "$GPG_KEY_FILE" 2>/dev/null; then
+                echo "✓ GPG key added for Kubernetes (latest)"
+                echo "deb [signed-by=${GPG_KEY_FILE}] https://pkgs.k8s.io/core:/stable:/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
+                GPG_KEY_ADDED=true
+                rm -f /tmp/k8s-release.key
+            fi
+        fi
+        
+        # Попытка 4: старый метод через packages.cloud.google.com
+        if [ "$GPG_KEY_ADDED" != true ] && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg -o /tmp/k8s-release.key 2>/dev/null; then
+            if gpg --dearmor < /tmp/k8s-release.key > /usr/share/keyrings/kubernetes-archive-keyring.gpg 2>/dev/null; then
+                echo "Warning: Using legacy repository (may not work)"
+                echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" > /etc/apt/sources.list.d/kubernetes.list
+                GPG_KEY_ADDED=true
+                rm -f /tmp/k8s-release.key
+            fi
+        fi
+        
+        # Очистка временного файла
+        rm -f /tmp/k8s-release.key
+        
+        if [ "$GPG_KEY_ADDED" != true ]; then
             echo "Error: Failed to add Kubernetes repository key"
+            echo "Tried URLs:"
+            echo "  - https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION}/deb/Release.key"
+            echo "  - https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key"
+            echo "  - https://pkgs.k8s.io/core:/stable:/deb/Release.key"
+            echo "  - https://packages.cloud.google.com/apt/doc/apt-key.gpg"
             return 1
         fi
         
@@ -591,10 +640,13 @@ EOF
         fi
     fi
     
-    # Настройка HAProxy для локального подключения
-    if [ -f /etc/kubernetes/kubelet.conf ]; then
-        sed -i --regexp-extended "s/(server: https:\/\/)[[:digit:]]{1,3}\.[[:digit:]]{1,3}\.[[:digit:]]{1,3}\.[[:digit:]]{1,3}/\1127.0.0.1/g" /etc/kubernetes/kubelet.conf
-        systemctl restart kubelet
+    # Настройка доступа для обычного пользователя
+    if [ -f /etc/kubernetes/admin.conf ]; then
+        echo "Setting up kubectl access for regular user..."
+        mkdir -p /home/ubuntu/.kube
+        cp /etc/kubernetes/admin.conf /home/ubuntu/.kube/config
+        chown -R ubuntu:ubuntu /home/ubuntu/.kube
+        echo "✓ kubectl configured for ubuntu user"
     fi
     
     echo "Master node initialized successfully"

@@ -96,9 +96,42 @@ sudo ./test.sh network    # Проверка сетевого подключен
 - `resources` - Проверка ресурсов системы
 - `network` - Проверка сетевого подключения
 
+## Доступ к кластеру
+
+### Изнутри VM
+После установки kubectl уже настроен внутри VM:
+```bash
+ssh -i data/keys/rsa.key ubuntu@<VM_IP>
+kubectl get nodes
+```
+
+### С хоста (извне)
+После установки kubeconfig автоматически копируется на хост:
+```bash
+# Использование kubeconfig из проекта
+export KUBECONFIG=$(pwd)/data/kubeconfig/config
+kubectl get nodes
+
+# Или скопировать в стандартное место
+mkdir -p ~/.kube
+cp data/kubeconfig/config ~/.kube/config
+kubectl get nodes
+```
+
+**Важно:** Для доступа с хоста нужен установленный `kubectl`:
+```bash
+# Ubuntu/Debian
+sudo apt-get update
+sudo apt-get install -y kubectl
+
+# Или через snap
+sudo snap install kubectl --classic
+```
+
 ## Примечания
 
 - Скрипт автоматически определяет, является ли VM master или worker узлом
 - Если IP VM не соответствует ни одному из настроенных master IP, создается single-node кластер
 - Все установки выполняются внутри VM
+- kubeconfig автоматически копируется на хост для доступа извне
 - При проблемах проверьте лог на VM: `ssh -i data/keys/rsa.key ubuntu@<VM_IP> "cat /tmp/k8s-install.log"`

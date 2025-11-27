@@ -1,6 +1,7 @@
 # Data directories
 data/images/
 data/keys/
+data/kubeconfig/
 
 # Config directories (keep structure but ignore generated files)
 config/seedconfig/user-data
@@ -10,6 +11,6 @@ config/seedconfig/meta-data
 *.log
 install.log
 
-# Temporary installation reports (keep INSTALLATION_REPORT_FULL.md)
+# Temporary installation reports
 INSTALLATION_REPORT.md
 INSTALLATION_SUCCESS.md

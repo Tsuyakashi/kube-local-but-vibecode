@@ -1,4 +1,7 @@
 #!/bin/bash
+
+set -e
+set -o pipefail
 # Главный скрипт установки Kubernetes кластера
 # Запускает quickinstall.sh из директории scripts
 
