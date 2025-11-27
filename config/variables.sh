@@ -9,6 +9,13 @@ master01_Hostname=master01
 master02_Hostname=master02
 master03_Hostname=master03
 
+# IP-адреса и имена хостов worker-узлов Kubernetes. Замените на свои.
+worker01_IP=10.44.44.21
+worker02_IP=10.44.44.22
+
+worker01_Hostname=worker01
+worker02_Hostname=worker02
+
 # IP-адрес и имя хоста, на котором выполняется скрипт.
 thisHostname=$(hostname)
 thisIP=$(hostname -i)
@@ -32,3 +39,8 @@ podSubnet=192.168.0.0/16
 
 # Пространство адресов сервисов. Замените на своё. Может быть любое, но должно быть достаточно большим.
 serviceSubnet=10.46.0.0/16
+
+# Пароль для пользователя ubuntu в VM (по умолчанию - случайный)
+# ВАЖНО: Для продакшена рекомендуется использовать более безопасный пароль или SSH ключи
+# Можно переопределить через переменную окружения: export VM_PASSWORD="your-secure-password"
+VM_PASSWORD="${VM_PASSWORD:-$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)}"

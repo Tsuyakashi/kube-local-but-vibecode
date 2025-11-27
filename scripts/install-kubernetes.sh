@@ -27,7 +27,7 @@ thisHostname=$(hostname)
 thisIP=$(hostname -I | awk '{for(i=1;i<=NF;i++) if($i !~ /^127\./) {print $i; exit}}')
 # Fallback если не нашли не-loopback IP
 if [ -z "$thisIP" ]; then
-    thisIP=$(hostname -I | awk '{print $1}')
+thisIP=$(hostname -I | awk '{print $1}')
 fi
 # Если все еще пусто, используем hostname -i
 if [ -z "$thisIP" ]; then
@@ -95,8 +95,27 @@ EOF
     
     # Загрузка и установка containerd
     if [ ! -f /usr/local/bin/containerd ]; then
-        curl -L https://github.com/containerd/containerd/releases/download/v${containerdVersion}/containerd-${containerdVersion}-linux-amd64.tar.gz \
-            --output /tmp/containerd-${containerdVersion}-linux-amd64.tar.gz
+        echo "Downloading containerd ${containerdVersion}..."
+        local max_attempts=3
+        local attempt=0
+        while [ $attempt -lt $max_attempts ]; do
+            if curl -L --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 5 \
+                https://github.com/containerd/containerd/releases/download/v${containerdVersion}/containerd-${containerdVersion}-linux-amd64.tar.gz \
+                --output /tmp/containerd-${containerdVersion}-linux-amd64.tar.gz; then
+                echo "Containerd downloaded successfully"
+                break
+            fi
+            attempt=$((attempt + 1))
+            if [ $attempt -lt $max_attempts ]; then
+                echo "Download failed, retrying... (attempt $attempt/$max_attempts)"
+                sleep 5
+            else
+                echo "Error: Failed to download containerd after $max_attempts attempts"
+                return 1
+            fi
+        done
+        
+        echo "Extracting containerd..."
         tar -xvf /tmp/containerd-${containerdVersion}-linux-amd64.tar.gz -C /usr/local &>/dev/null
         rm -f /tmp/containerd-${containerdVersion}-linux-amd64.tar.gz
     fi
@@ -136,19 +155,31 @@ EOF
     
     # Установка runc
     if [ ! -f /usr/local/sbin/runc ]; then
-        curl -L https://github.com/opencontainers/runc/releases/download/v${runcVersion}/runc.amd64 \
-            --output /tmp/runc.amd64
+        echo "Downloading runc ${runcVersion}..."
+        if ! curl -L --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 5 \
+            https://github.com/opencontainers/runc/releases/download/v${runcVersion}/runc.amd64 \
+            --output /tmp/runc.amd64; then
+            echo "Error: Failed to download runc"
+            return 1
+        fi
         install -m 755 /tmp/runc.amd64 /usr/local/sbin/runc
         rm -f /tmp/runc.amd64
+        echo "Runc installed successfully"
     fi
     
     # Установка CNI плагинов
     if [ ! -d /opt/cni/bin ]; then
-        curl -L https://github.com/containernetworking/plugins/releases/download/v${cniPluginsVersion}/cni-plugins-linux-amd64-v${cniPluginsVersion}.tgz \
-            --output /tmp/cni-plugins-linux-amd64-v${cniPluginsVersion}.tgz
+        echo "Downloading CNI plugins ${cniPluginsVersion}..."
+        if ! curl -L --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 5 \
+            https://github.com/containernetworking/plugins/releases/download/v${cniPluginsVersion}/cni-plugins-linux-amd64-v${cniPluginsVersion}.tgz \
+            --output /tmp/cni-plugins-linux-amd64-v${cniPluginsVersion}.tgz; then
+            echo "Error: Failed to download CNI plugins"
+            return 1
+        fi
         mkdir -p /opt/cni/bin
         tar Cxzvf /opt/cni/bin /tmp/cni-plugins-linux-amd64-v${cniPluginsVersion}.tgz &>/dev/null
         rm -f /tmp/cni-plugins-linux-amd64-v${cniPluginsVersion}.tgz
+        echo "CNI plugins installed successfully"
     fi
     
     # Запуск containerd
@@ -166,9 +197,12 @@ function installEtcd() {
     
     # Проверка, является ли узел master
     local is_master=false
-    if [[ "$thisIP" == "$master01_IP" ]] || \
-       [[ "$thisIP" == "$master02_IP" ]] || \
-       [[ "$thisIP" == "$master03_IP" ]]; then
+    local is_master01=false
+    
+    if [[ "$thisIP" == "$master01_IP" ]]; then
+        is_master=true
+        is_master01=true
+    elif [[ "$thisIP" == "$master02_IP" ]] || [[ "$thisIP" == "$master03_IP" ]]; then
         is_master=true
     fi
     
@@ -177,20 +211,32 @@ function installEtcd() {
         return 0
     fi
     
+    # Для первого мастера пропускаем установку external etcd
+    # так как будет использоваться встроенный etcd от kubeadm
+    if [ "$is_master01" = true ]; then
+        echo "Skipping external etcd installation for first master (will use built-in etcd)"
+        return 0
+    fi
+    
     apt install -y curl &>/dev/null
     
     # Загрузка и установка etcd
     if [ ! -f /usr/local/bin/etcd ]; then
-        curl -L https://github.com/etcd-io/etcd/releases/download/v${etcdVersion}/etcd-v${etcdVersion}-linux-amd64.tar.gz \
-            --output /tmp/etcd-v${etcdVersion}-linux-amd64.tar.gz
+        echo "Downloading etcd ${etcdVersion}..."
+        if ! curl -L --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 5 \
+            https://github.com/etcd-io/etcd/releases/download/v${etcdVersion}/etcd-v${etcdVersion}-linux-amd64.tar.gz \
+            --output /tmp/etcd-v${etcdVersion}-linux-amd64.tar.gz; then
+            echo "Error: Failed to download etcd"
+            return 1
+        fi
         tar -xvf /tmp/etcd-v${etcdVersion}-linux-amd64.tar.gz -C /usr/local/bin/ --strip-components=1 &>/dev/null
         rm -f /tmp/etcd-v${etcdVersion}-linux-amd64.tar.gz
+        echo "Etcd installed successfully"
     fi
     
-    # Создание файла окружения
+    # Создание файла окружения (только для токена, без ETCD_NAME чтобы избежать конфликта)
     etcdEnvironmentFilePath=/etc/etcd.env
     cat > ${etcdEnvironmentFilePath} <<EOF
-ETCD_NAME=${thisHostname}
 ETCD_INITIAL_CLUSTER_TOKEN=${etcdToken}
 EOF
     
@@ -457,7 +503,7 @@ function installKubernetes() {
             # Обновляем переменную для использования в kubeadm
             kubernetesVersion="$INSTALLED_K8S_VERSION"
         fi
-        
+    
         echo "✓ Kubernetes components installed successfully"
     else
         echo "Kubernetes components already installed"
@@ -552,7 +598,41 @@ EOF
     if [ "$is_master01" = true ]; then
         # Первый master узел - инициализация кластера
         echo "Initializing first master node..."
-        if ! kubeadm init --config=/tmp/kubeadm-init.yaml; then
+        
+        # Для первого мастера используем встроенный etcd вместо external
+        # External etcd будет использоваться только после настройки всех мастеров
+        echo "Using built-in etcd for first master (external etcd will be configured later)..."
+        
+        # Создаем конфигурацию с встроенным etcd для первого мастера
+        cat > /tmp/kubeadm-init-first.yaml <<EOF
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: "${thisIP}"
+nodeRegistration:
+  criSocket: "${containerdEndpoint}"
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: v${kubernetesVersion}
+apiServer:
+  certSANs:
+  - ${master01_IP}
+  - ${master02_IP}
+  - ${master03_IP}
+  - ${thisIP}
+  - 127.0.0.1
+controlPlaneEndpoint: ${master01_IP}:6443
+# Используем встроенный etcd для первого мастера
+# etcd будет настроен автоматически kubeadm
+networking:
+  podSubnet: "${podSubnet}"
+  serviceSubnet: "${serviceSubnet}"
+  dnsDomain: "cluster.local"
+EOF
+        
+        if ! kubeadm init --config=/tmp/kubeadm-init-first.yaml; then
             echo "Error: kubeadm init failed"
             return 1
         fi
@@ -679,7 +759,7 @@ function joinWorkerNode() {
         return 1
     fi
     
-    kubeadm join ${master01_IP}:6443 --token $KUBEADM_TOKEN --discovery-token-ca-cert-hash sha256:$KUBEADM_CA_CERT_HASH
+    kubeadm join "${master01_IP}:6443" --token "${KUBEADM_TOKEN}" --discovery-token-ca-cert-hash "sha256:${KUBEADM_CA_CERT_HASH}"
     
     echo "Worker node joined successfully"
 }
@@ -688,20 +768,9 @@ function joinWorkerNode() {
 # Главная функция
 # ============================================
 function main() {
-    # Создание лог-файла (с правами root)
-    LOG_FILE="/tmp/k8s-install.log"
-    touch "$LOG_FILE" 2>/dev/null || true
-    chmod 666 "$LOG_FILE" 2>/dev/null || true
-    
+    # Лог-файл уже обрабатывается в quickinstall.sh через tee
+    # Здесь просто выводим информацию о начале установки
     echo "Installation started at $(date)"
-    echo "Log file: $LOG_FILE"
-    
-    # Перенаправление вывода в лог (если возможно)
-    if [ -w "$LOG_FILE" ]; then
-        exec > >(tee -a "$LOG_FILE") 2>&1
-    else
-        echo "Warning: Cannot write to log file, continuing without logging"
-    fi
     
     # Выполнение установки с обработкой ошибок
     if ! diskConfigure; then

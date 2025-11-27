@@ -4,8 +4,10 @@ data/keys/
 data/kubeconfig/
 
 # Config directories (keep structure but ignore generated files)
-config/seedconfig/user-data
-config/seedconfig/meta-data
+config/seedconfig/**/user-data
+config/seedconfig/**/meta-data
+config/seedconfig/*/user-data
+config/seedconfig/*/meta-data
 
 # Log files
 *.log

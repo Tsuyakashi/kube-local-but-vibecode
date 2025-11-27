@@ -4,6 +4,7 @@
 # Запускается внутри VM
 
 set -e
+set -o pipefail
 
 if [ "${EUID}" -ne 0 ]; then
     echo "Error: You need to run this script as root"

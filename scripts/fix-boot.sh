@@ -3,6 +3,7 @@
 # Использование: sudo ./fix-boot.sh
 
 set -e
+set -o pipefail
 
 echo "=== Исправление проблем с загрузкой VM ==="
 

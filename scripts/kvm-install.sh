@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set -e
+set -o pipefail
 
 # Определение путей
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -236,7 +237,7 @@ users:
   - name: $VM_USER
     gecos: some text can be here
     sudo: ALL=(ALL) NOPASSWD:ALL
-    plain_text_passwd: somepassword # it will be better to edit and even to encrypt
+    plain_text_passwd: ${VM_PASSWORD:-$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)}
     groups: sudo, admin
     shell: /bin/bash
     ssh_authorized_keys:

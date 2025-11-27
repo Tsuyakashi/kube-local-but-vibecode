@@ -4,6 +4,7 @@
 # Помогает диагностировать проблемы на каждом этапе
 
 set -e
+set -o pipefail
 
 VM_NAME="ubuntu-noble"
 VM_IP=""
