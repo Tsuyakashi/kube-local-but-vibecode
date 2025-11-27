@@ -16,11 +16,12 @@ function isRoot() {
 isRoot
 
 function getUbuntuVm(){
-    if ! virsh list | grep -q "$VM_NAME"; then
-        chmod +x ./kvm-install.sh
-        ./kvm-install.sh --ubuntu --full
+    chmod +x ./kvm-install.sh
+    if ! virsh list --all --name | grep -q "^${VM_NAME}$"; then
+        ./kvm-install.sh --full
     else
-        echo "VM already exists"
+        # VM exists, call without --full to show manage menu
+        ./kvm-install.sh
     fi
 }
 

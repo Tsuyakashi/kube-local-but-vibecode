@@ -2,14 +2,14 @@
 
 set -e
 
-VM_NAME="Amazon-Linux-2023"
-VM_USER=ec2-user
-VM_IMAGE=amzn2-root.qcow2
-VM_IMAGE_FORMAT=qcow2
-VM_IMAGE_TEMPLATE=amzn2-template.qcow2
-VM_IMAGE_LINK=https://cdn.amazonlinux.com/al2023/os-images/2023.9.20251105.0/kvm/al2023-kvm-2023.9.20251105.0-kernel-6.1-x86_64.xfs.gpt.qcow2
+VM_NAME="ubuntu-noble"
+VM_USER=ubuntu
+VM_IMAGE=ubuntu-root.img
+VM_IMAGE_FORMAT=img
+VM_IMAGE_TEMPLATE=ubuntu-template.img
+VM_IMAGE_LINK=https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
 
-APT_UPDATED_PACKS=0
+APT_UPDATED=false
     
 IMAGE_SIZE=20g
 VM_MEMORY=2048
@@ -28,7 +28,7 @@ function init() {
 	echo "Welcome to kvm-on-machine installer!"
 	echo "The git repository is available at: https://github.com/Tsuyakashi/kvm-on-machine"
 	echo ""
-    echo "[KVM INSTALLER]: Start $VM_NAME autoinstallaion?"
+    echo "[KVM INSTALLER]: Start $VM_NAME autoinstallation?"
 	read -n1 -r -p "Press any key to continue..."
 
     fullInstall
@@ -74,7 +74,7 @@ function debugMenu () {
 	echo ""
 	echo "What do you want to do?"
 	echo "   1) install/check req"
-	echo "   2) install/check amzn image"
+	echo "   2) install/check VM image"
 	echo "   3) check/make libvirt/images"
 	echo "   4) copy template image in /var/lib/libvirt/images"
     echo "   5) generate/check keys"
@@ -91,7 +91,7 @@ function debugMenu () {
 		installRequirements
 		;;
 	2)
-		getAmznImage
+		getVMImage
 		;;
 	3)
 		mkLibvirtDir
@@ -121,7 +121,7 @@ function debugMenu () {
 function installRequirements() {
     # add installation check
     echo " "
-    echo "[KVM INSTALLER]: Installing requied packages with apt"
+    echo "[KVM INSTALLER]: Installing required packages with apt"
     echo " "
     
     checkPacks "bridge-utils" 
@@ -135,16 +135,16 @@ function installRequirements() {
     checkPacks "genisoimage"
 
     echo " "
-    echo "[KVM INSTALLER]: All packages are isntalled"
+    echo "[KVM INSTALLER]: All packages are installed"
     echo " "
 }
 
 function checkPacks() {
     local PACKAGE_NAME="$1" 
     if ! dpkg -s "$PACKAGE_NAME" &>/dev/null; then
-        if [[ APT_UPDATED_PACKS != true ]]; then
+        if [[ "$APT_UPDATED" != true ]]; then
             sudo apt update &> /dev/null
-            APT_UPDATED_PACKS=1
+            APT_UPDATED=true
         fi
         echo "[KVM INSTALLER]: installing $PACKAGE_NAME"
         sudo apt install -y "$PACKAGE_NAME" &> /dev/null
@@ -153,14 +153,14 @@ function checkPacks() {
     fi
 }    
 
-function getAmznImage() {
+function getVMImage() {
     echo "[KVM INSTALLER]: Getting $VM_NAME image"
     if [ ! -f "./images/$VM_IMAGE_TEMPLATE" ]; then
-        if [ ! -d "./images" ]; then
-            mkdir images/
+            mkdir -p images/
+        if ! wget -O "./images/$VM_IMAGE_TEMPLATE" "$VM_IMAGE_LINK"; then
+            echo "[KVM INSTALLER]: Failed to download image"
+            return 1
         fi
-        wget -O ./images/$VM_IMAGE_TEMPLATE \
-            $VM_IMAGE_LINK
     else 
         echo "[KVM INSTALLER]: Already downloaded"
     fi
@@ -173,20 +173,32 @@ function mkLibvirtDir() {
 
 function cpImage() {
     #add reinstalling
-    echo "[KVM INSTALLER]: Coping image"
-    sudo cp \
-        ./images/$VM_IMAGE_TEMPLATE \
-        /var/lib/libvirt/images/$VM_IMAGE
+    echo "[KVM INSTALLER]: Copying image"
+    if [ ! -f "/var/lib/libvirt/images/$VM_IMAGE" ]; then
+        sudo cp \
+            "./images/$VM_IMAGE_TEMPLATE" \
+            "/var/lib/libvirt/images/$VM_IMAGE"
+    else
+        echo "[KVM INSTALLER]: Image already exists at /var/lib/libvirt/images/$VM_IMAGE"
+    fi
 }
 
 function resizeImage() {
     echo "[KVM INSTALLER]: Resizing image for $IMAGE_SIZE"
-    sudo qemu-img resize /var/lib/libvirt/images/$VM_IMAGE $IMAGE_SIZE &>/dev/null
+    if ! sudo qemu-img resize "/var/lib/libvirt/images/$VM_IMAGE" "$IMAGE_SIZE" &>/dev/null; then
+        echo "[KVM INSTALLER]: Failed to resize image"
+        return 1
+    fi
 }
 
 function createDiskB() {
+    local DISK_NAME="${VM_NAME}-disk.qcow2"
     echo "[KVM INSTALLER]: Creating additional disk"
-    sudo qemu-img create -f qcow2 /var/lib/libvirt/images/ubuntu-noble-disk.qcow2 25G &>/dev/null
+    if [ ! -f "/var/lib/libvirt/images/$DISK_NAME" ]; then
+        sudo qemu-img create -f qcow2 "/var/lib/libvirt/images/$DISK_NAME" 25G &>/dev/null
+    else
+        echo "[KVM INSTALLER]: Additional disk already exists"
+    fi
 }
 
 function keysGen() {
@@ -196,7 +208,8 @@ function keysGen() {
             mkdir keys/
         fi
         ssh-keygen -f ./keys/rsa.key -t rsa -N "" > /dev/null
-        sudo chmod 644 ./keys/rsa.key
+        chmod 600 ./keys/rsa.key
+        chmod 644 ./keys/rsa.key.pub
     else
         echo "[KVM INSTALLER]: Keys already exist"
     fi
@@ -209,7 +222,7 @@ function seedConfigGen() {
         mkdir seedconfig/
     fi
     if [ ! -f "./seedconfig/user-data" ]; then
-        tee -a seedconfig/user-data > /dev/null <<EOF
+        tee seedconfig/user-data > /dev/null <<EOF
 #cloud-config
 #vim:syntax=yaml
 users:
@@ -227,7 +240,7 @@ EOF
     fi
     
     if [ ! -f "./seedconfig/meta-data" ]; then
-        tee -a seedconfig/meta-data > /dev/null <<EOF
+        tee seedconfig/meta-data > /dev/null <<EOF
 #cloud-config
 local-hostname: $VM_NAME.local
 EOF
@@ -238,26 +251,48 @@ EOF
 
 function mkIso() {
     echo "[KVM INSTALLER]: Making iso"
+    if [ ! -f "./seedconfig/user-data" ] || [ ! -f "./seedconfig/meta-data" ]; then
+        echo "[KVM INSTALLER]: seedconfig files not found. Run seedConfigGen first."
+        return 1
+    fi
     # I: -input-charset not specified, using utf-8 (detected in locale settings)
-    sudo genisoimage \
+    if ! sudo genisoimage \
         -output /var/lib/libvirt/images/seed.iso \
         -volid cidata \
         -joliet \
         -rock \
         ./seedconfig/user-data \
-        ./seedconfig/meta-data &>/dev/null
+        ./seedconfig/meta-data &>/dev/null; then
+        echo "[KVM INSTALLER]: Failed to create ISO"
+        return 1
+    fi
 }
 
 function initKvm() {
+    if virsh list --all --name | grep -q "^${VM_NAME}$"; then
+        echo "[KVM INSTALLER]: VM $VM_NAME already exists. Use --debug menu to manage it."
+        return 1
+    fi
+    
+    local DISK_NAME="${VM_NAME}-disk.qcow2"
+    local OS_VARIANT="generic"
+    
+    # Set appropriate OS variant based on VM type
+    if [[ "$VM_NAME" == *"Amazon-Linux"* ]] || [[ "$VM_NAME" == *"amzn"* ]]; then
+        OS_VARIANT="al2023"
+    elif [[ "$VM_NAME" == *"ubuntu"* ]]; then
+        OS_VARIANT="ubuntu22.04"
+    fi
+    
     echo "[KVM INSTALLER]: Installing $VM_NAME VM"
     sudo virt-install \
-        --name $VM_NAME \
-        --memory $VM_MEMORY \
-        --vcpus $VM_CPUS \
-        --disk path=/var/lib/libvirt/images/$VM_IMAGE,format=$VM_IMAGE_FORMAT \
-        --disk path=/var/lib/libvirt/images/seed.iso,device=cdrom \
-        --disk path=/var/lib/libvirt/images/ubuntu-noble-disk.qcow2,format=qcow2 \
-        --os-variant fedora36 \
+        --name "$VM_NAME" \
+        --memory "$VM_MEMORY" \
+        --vcpus "$VM_CPUS" \
+        --disk "path=/var/lib/libvirt/images/$VM_IMAGE,format=$VM_IMAGE_FORMAT" \
+        --disk "path=/var/lib/libvirt/images/seed.iso,device=cdrom" \
+        --disk "path=/var/lib/libvirt/images/$DISK_NAME,format=qcow2" \
+        --os-variant "$OS_VARIANT" \
         --virt-type kvm \
         --graphics none \
         --console pty,target_type=serial \
@@ -267,22 +302,22 @@ function initKvm() {
 
 function checkInit() {
     for i in {1..30}; do
-        if virsh domifaddr $VM_NAME | grep -q "ipv4"; then
-            echo "[KVM INSTALLER]: VM is running on $(virsh domifaddr $VM_NAME \
+        if virsh domifaddr "$VM_NAME" 2>/dev/null | grep -q "ipv4"; then
+            echo "[KVM INSTALLER]: VM is running on $(virsh domifaddr "$VM_NAME" \
             | awk '/ipv4/ { split($4, a, "/"); print a[1] }')"
             return 0
         fi
         echo "[KVM INSTALLER]: VM is still starting"
         sleep 5
     done
-    echo "VM did not become avaible in time"
+    echo "[KVM INSTALLER]: VM did not become available in time"
     return 1
 }
 
 function fullInstall() {
     isRoot
     installRequirements
-    getAmznImage
+    getVMImage
     mkLibvirtDir
     cpImage
     resizeImage
@@ -295,20 +330,20 @@ function fullInstall() {
 }
 
 function listVM () {
-    virsh list | grep $VM_NAME
+    virsh list | grep "$VM_NAME"
 }
 
 function showIP () {
-    virsh domifaddr $VM_NAME
+    virsh domifaddr "$VM_NAME"
 }
 
 function shutVMDown() {
-    virsh shutdown $VM_NAME
+    virsh shutdown "$VM_NAME"
 }
 
 function destroyVM () {
-    virsh destroy $VM_NAME
-    virsh undefine $VM_NAME --remove-all-storage
+    virsh destroy "$VM_NAME" 2>/dev/null || true
+    virsh undefine "$VM_NAME" --remove-all-storage
 }
 
 FULL_FLAG=false
@@ -316,13 +351,13 @@ DEBUG_FLAG=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --ubuntu)
-            VM_NAME="ubuntu-noble"
-            VM_USER=ubuntu
-            VM_IMAGE=ubuntu-root.img
-            VM_IMAGE_FORMAT=img
-            VM_IMAGE_TEMPLATE=ubuntu-template.img
-            VM_IMAGE_LINK=https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+        --amazon)
+            VM_NAME="Amazon-Linux-2023"
+            VM_USER=ec2-user
+            VM_IMAGE=amzn2-root.qcow2
+            VM_IMAGE_FORMAT=qcow2
+            VM_IMAGE_TEMPLATE=amzn2-template.qcow2
+            VM_IMAGE_LINK=https://cdn.amazonlinux.com/al2023/os-images/2023.9.20251105.0/kvm/al2023-kvm-2023.9.20251105.0-kernel-6.1-x86_64.xfs.gpt.qcow2
             shift
             ;;  
         --full)
