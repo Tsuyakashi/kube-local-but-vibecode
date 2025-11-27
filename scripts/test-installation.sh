@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Скрипт для тестирования установки Kubernetes
-# Помогает диагностировать проблемы на каждом этапе
+# Script to test Kubernetes installation
+# Helps diagnose problems at each stage
 
 set -e
 set -o pipefail

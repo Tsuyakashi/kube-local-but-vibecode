@@ -7,7 +7,7 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Загрузка переменных из config/variables.sh
+# Load variables from config/variables.sh
 if [ ! -f "$PROJECT_ROOT/config/variables.sh" ]; then
     echo "Error: variables.sh not found"
     exit 1
@@ -16,11 +16,11 @@ source "$PROJECT_ROOT/config/variables.sh"
 
 APT_UPDATED=0
 
-# Параметры по умолчанию
+# Default parameters
 NUM_MASTERS=3
 NUM_WORKERS=2
 
-# Парсинг аргументов командной строки
+# Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         --masters)
@@ -52,7 +52,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Валидация параметров
+# Validate parameters
 if ! [[ "$NUM_MASTERS" =~ ^[0-9]+$ ]] || [ "$NUM_MASTERS" -lt 1 ]; then
     echo "Error: --masters must be a positive integer"
     exit 1
@@ -63,7 +63,7 @@ if ! [[ "$NUM_WORKERS" =~ ^[0-9]+$ ]] || [ "$NUM_WORKERS" -lt 0 ]; then
     exit 1
 fi
 
-# Массивы для хранения информации об узлах
+# Arrays to store node information
 declare -a MASTER_NAMES
 declare -a MASTER_IPS
 declare -a MASTER_HOSTNAMES
@@ -71,61 +71,61 @@ declare -a WORKER_NAMES
 declare -a WORKER_IPS
 declare -a WORKER_HOSTNAMES
 
-# Функция для генерации MAC адреса
+# Function to generate MAC address
 function generateMAC() {
-    local NODE_TYPE="$1"  # "master" или "worker"
-    local INDEX="$2"      # номер узла (1-based)
+    local NODE_TYPE="$1"  # "master" or "worker"
+    local INDEX="$2"      # node number (1-based)
     
     if [ "$NODE_TYPE" = "master" ]; then
-        # Мастера: 52:54:00:44:44:11, 52:54:00:44:44:12, ...
+        # Masters: 52:54:00:44:44:11, 52:54:00:44:44:12, ...
         local OCTET=$((10 + INDEX))
         printf "52:54:00:44:44:%02x" "$OCTET"
     else
-        # Воркеры: 52:54:00:44:44:21, 52:54:00:44:44:22, ...
+        # Workers: 52:54:00:44:44:21, 52:54:00:44:44:22, ...
         local OCTET=$((20 + INDEX))
         printf "52:54:00:44:44:%02x" "$OCTET"
     fi
 }
 
-# Функция для генерации IP адреса
+# Function to generate IP address
 function generateIP() {
-    local NODE_TYPE="$1"  # "master" или "worker"
-    local INDEX="$2"      # номер узла (1-based)
+    local NODE_TYPE="$1"  # "master" or "worker"
+    local INDEX="$2"      # node number (1-based)
     
     if [ "$NODE_TYPE" = "master" ]; then
-        # Мастера: 10.44.44.11, 10.44.44.12, ...
+        # Masters: 10.44.44.11, 10.44.44.12, ...
         echo "10.44.44.$((10 + INDEX))"
     else
-        # Воркеры: 10.44.44.21, 10.44.44.22, ...
+        # Workers: 10.44.44.21, 10.44.44.22, ...
         echo "10.44.44.$((20 + INDEX))"
     fi
 }
 
-# Функция для генерации hostname
+# Function to generate hostname
 function generateHostname() {
-    local NODE_TYPE="$1"  # "master" или "worker"
-    local INDEX="$2"      # номер узла (1-based)
+    local NODE_TYPE="$1"  # "master" or "worker"
+    local INDEX="$2"      # node number (1-based)
     
     printf "%s%02d" "$NODE_TYPE" "$INDEX"
 }
 
-# Инициализация массивов узлов
+# Initialize node arrays
 function initializeNodes() {
-    # Генерация мастеров
+    # Generate masters
     for i in $(seq 1 "$NUM_MASTERS"); do
         MASTER_NAMES[$((i-1))]=$(generateHostname "master" "$i")
         MASTER_IPS[$((i-1))]=$(generateIP "master" "$i")
         MASTER_HOSTNAMES[$((i-1))]=$(generateHostname "master" "$i")
     done
     
-    # Генерация воркеров
+    # Generate workers
     for i in $(seq 1 "$NUM_WORKERS"); do
         WORKER_NAMES[$((i-1))]=$(generateHostname "worker" "$i")
         WORKER_IPS[$((i-1))]=$(generateIP "worker" "$i")
         WORKER_HOSTNAMES[$((i-1))]=$(generateHostname "worker" "$i")
     done
     
-    # Установка master01_IP для обратной совместимости
+    # Set master01_IP for backward compatibility
     if [ "$NUM_MASTERS" -ge 1 ]; then
         master01_IP="${MASTER_IPS[0]}"
         master01_Hostname="${MASTER_HOSTNAMES[0]}"
@@ -139,7 +139,7 @@ function isRoot() {
 	fi
 }
 
-# Функция для создания VM узла
+# Function to create VM node
 function createVMNode() {
     local NODE_NAME="$1"
     local NODE_IP="$2"
@@ -152,14 +152,14 @@ function createVMNode() {
     echo "  Hostname: ${NODE_HOSTNAME}"
     echo "=========================================="
     
-    # Проверка существования VM
+    # Check if VM exists
     if virsh list --all --name | grep -q "^${NODE_NAME}$"; then
         echo "VM ${NODE_NAME} already exists"
         
-        # Проверяем, есть ли у VM IP адрес
+        # Check if VM has IP address
         local has_ip=false
         if virsh list --name | grep -q "^${NODE_NAME}$"; then
-            # VM запущена, проверяем IP
+            # VM is running, check IP
             if virsh domifaddr "$NODE_NAME" 2>/dev/null | grep -q "ipv4"; then
                 has_ip=true
             elif [ -n "$NODE_IP" ] && nc -z "$NODE_IP" 22 2>/dev/null; then
@@ -167,39 +167,39 @@ function createVMNode() {
             fi
         fi
         
-        # Если VM запущена, но нет IP, перезапускаем и пересоздаем cloud-init ISO
+        # If VM is running but has no IP, restart and recreate cloud-init ISO
         if [ "$has_ip" = false ] && virsh list --name | grep -q "^${NODE_NAME}$"; then
             echo "VM ${NODE_NAME} is running but has no IP."
             echo "Recreating cloud-init ISO and restarting VM..."
             
-            # Пересоздаем cloud-init ISO
+            # Recreate cloud-init ISO
             if [ -f "$SCRIPT_DIR/create-vm-node.sh" ]; then
                 chmod +x "$SCRIPT_DIR/create-vm-node.sh"
-                # Пересоздаем только cloud-init ISO (VM уже существует)
+                # Recreate only cloud-init ISO (VM already exists)
                 "$SCRIPT_DIR/create-vm-node.sh" "$NODE_NAME" "$NODE_IP" "$NODE_HOSTNAME" --recreate-iso-only 2>/dev/null || {
                     echo "Warning: Failed to recreate cloud-init ISO, trying regular restart..."
                 }
             fi
             
             virsh shutdown "${NODE_NAME}" 2>/dev/null || true
-            sleep 5  # Даем время на корректное завершение
+            sleep 5  # Give time for proper shutdown
             virsh start "${NODE_NAME}"
             echo "Waiting for VM ${NODE_NAME} to boot and get IP address..."
-            sleep 20  # Увеличено время ожидания после перезапуска (cloud-init нужно время)
+            sleep 20  # Increased wait time after restart (cloud-init needs time)
         fi
         
-        # Запуск VM если не запущена
+        # Start VM if not running
         if ! virsh list --name | grep -q "^${NODE_NAME}$"; then
             echo "Starting VM ${NODE_NAME}..."
             virsh start "${NODE_NAME}"
-            sleep 5  # Даем время на загрузку
+            sleep 5  # Give time for boot
         fi
         
         echo "VM ${NODE_NAME} is ready"
         return 0
     fi
     
-    # Создание VM через create-vm-node.sh
+    # Create VM via create-vm-node.sh
     if [ ! -f "$SCRIPT_DIR/create-vm-node.sh" ]; then
         echo "Error: create-vm-node.sh not found"
         exit 1
@@ -212,7 +212,7 @@ function createVMNode() {
     }
 }
 
-# Функция для установки Kubernetes на узле
+# Function to install Kubernetes on node
 function installKubernetesOnNode() {
     local NODE_NAME="$1"
     local EXPECTED_IP="$2"
@@ -222,14 +222,14 @@ function installKubernetesOnNode() {
     echo "Installing Kubernetes on ${NODE_NAME} (expected IP: ${EXPECTED_IP})"
     echo "=========================================="
     
-    # Получаем реальный IP адрес VM
+    # Get real IP address of VM
     local NODE_IP=""
-    local max_attempts=30  # Уменьшено с 60 до 30 (1 минута вместо 2)
+    local max_attempts=30  # Reduced from 60 to 30 (1 minute instead of 2)
     local attempt=0
     
     echo "Waiting for VM ${NODE_NAME} to get IP address..."
     
-    # Сначала проверяем, запущена ли VM
+    # First check if VM is running
     if ! virsh list --name | grep -q "^${NODE_NAME}$"; then
         echo "VM ${NODE_NAME} is not running. Starting it..."
         virsh start "${NODE_NAME}" 2>/dev/null || {
@@ -239,7 +239,7 @@ function installKubernetesOnNode() {
         sleep 3
     fi
     
-    # Быстрая проверка через ожидаемый IP (если известен)
+    # Quick check via expected IP (if known)
     if [ -n "$EXPECTED_IP" ]; then
         echo "Checking expected IP ${EXPECTED_IP}..."
         for quick_check in $(seq 1 5); do
@@ -252,10 +252,10 @@ function installKubernetesOnNode() {
         done
     fi
     
-    # Если не получили IP через ожидаемый, пробуем через virsh
+    # If didn't get IP via expected, try via virsh
     if [ -z "$NODE_IP" ]; then
         while [ $attempt -lt $max_attempts ]; do
-            # Пробуем получить IP из virsh domifaddr
+            # Try to get IP from virsh domifaddr
             local virsh_output=$(virsh domifaddr "$NODE_NAME" 2>/dev/null)
             if echo "$virsh_output" | grep -q "ipv4"; then
                 NODE_IP=$(echo "$virsh_output" | awk '/ipv4/ { split($4, a, "/"); print a[1] }' | head -1)
@@ -265,7 +265,7 @@ function installKubernetesOnNode() {
                 fi
             fi
             
-            # Альтернативный способ - через SSH если ожидаемый IP известен
+            # Alternative method - via SSH if expected IP is known
             if [ -n "$EXPECTED_IP" ] && nc -z "$EXPECTED_IP" 22 2>/dev/null; then
                 NODE_IP="$EXPECTED_IP"
                 echo "VM ${NODE_NAME} is accessible on expected IP: ${NODE_IP}"
@@ -275,7 +275,7 @@ function installKubernetesOnNode() {
             attempt=$((attempt + 1))
             if [ $((attempt % 3)) -eq 0 ]; then
                 echo "Still waiting for ${NODE_NAME}... (attempt $attempt/$max_attempts)"
-                # Показываем текущий статус
+                # Show current status
                 local vm_status=$(virsh domifaddr "$NODE_NAME" 2>/dev/null || echo "  No IP address yet")
                 echo "  Status: $vm_status"
             fi
@@ -283,7 +283,7 @@ function installKubernetesOnNode() {
         done
     fi
     
-    # Если не удалось определить IP, используем ожидаемый IP как fallback
+    # If failed to determine IP, use expected IP as fallback
     if [ -z "$NODE_IP" ]; then
         if [ -n "$EXPECTED_IP" ]; then
             echo "Warning: Could not determine IP from virsh, using expected IP: ${EXPECTED_IP}"
@@ -310,11 +310,11 @@ function installKubernetesOnNode() {
         fi
     fi
     
-    # Удаление старых SSH ключей для этого IP (если VM была пересоздана)
+    # Remove old SSH keys for this IP (if VM was recreated)
     ssh-keygen -R "${NODE_IP}" -f /root/.ssh/known_hosts 2>/dev/null || true
     ssh-keygen -R "${NODE_NAME}" -f /root/.ssh/known_hosts 2>/dev/null || true
     
-    # Проверка SSH доступности
+    # Check SSH accessibility
     echo "Checking SSH connectivity to ${NODE_NAME} (${NODE_IP})..."
     if ! nc -z "$NODE_IP" 22 2>/dev/null; then
         echo "Error: Cannot connect to ${NODE_NAME} via SSH on ${NODE_IP}"
@@ -323,7 +323,7 @@ function installKubernetesOnNode() {
     
     echo "SSH is accessible on ${NODE_NAME} (${NODE_IP})"
     
-    # Копирование файлов
+    # Copy files
     echo "Copying installation files to ${NODE_NAME}..."
     
     scp -i "$PROJECT_ROOT/data/keys/rsa.key" \
@@ -346,7 +346,7 @@ function installKubernetesOnNode() {
         return 1
     }
     
-    # Установка Kubernetes
+    # Install Kubernetes
     echo "Installing Kubernetes on ${NODE_NAME}..."
     echo "Note: This may take 10-20 minutes. Please be patient..."
     
@@ -373,13 +373,13 @@ function installKubernetesOnNode() {
     echo "✓ Kubernetes installed successfully on ${NODE_NAME}"
 }
 
-# Функция для получения join token с первого мастера
+# Function to get join token from first master
 function getJoinToken() {
     local MASTER_IP="$1"
     
     echo "Getting join token from master01 (${MASTER_IP})..."
     
-    # Ждем пока кластер будет готов
+    # Wait until cluster is ready
     local max_attempts=60
     local attempt=0
     while [ $attempt -lt $max_attempts ]; do
@@ -399,7 +399,7 @@ function getJoinToken() {
         fi
     done
     
-    # Получение token (создаем новый если нужно)
+    # Get token (create new if needed)
     echo "Creating/retrieving join token..."
     KUBEADM_TOKEN=$(ssh -i "$PROJECT_ROOT/data/keys/rsa.key" \
         -o StrictHostKeyChecking=accept-new \
@@ -408,7 +408,7 @@ function getJoinToken() {
         "ubuntu@${MASTER_IP}" \
         "sudo kubeadm token create --ttl=0 --print-join-command 2>/dev/null | awk '{print \$5}'" || echo "")
     
-    # Если не удалось получить токен, пробуем получить существующий неистекший
+    # If failed to get token, try to get existing non-expired one
     if [ -z "$KUBEADM_TOKEN" ]; then
         echo "Trying to get existing non-expired token..."
         KUBEADM_TOKEN=$(ssh -i "$PROJECT_ROOT/data/keys/rsa.key" \
@@ -419,7 +419,7 @@ function getJoinToken() {
             "sudo kubeadm token list 2>/dev/null | grep -v '^TOKEN' | awk '\$2 == \"never\" || \$2 !~ /expired/ {print \$1}' | head -1" || echo "")
     fi
     
-    # Получение CA cert hash
+    # Get CA cert hash
     echo "Getting CA certificate hash..."
     KUBEADM_CA_CERT_HASH=$(ssh -i "$PROJECT_ROOT/data/keys/rsa.key" \
         -o StrictHostKeyChecking=accept-new \
@@ -442,7 +442,7 @@ function getJoinToken() {
     export KUBEADM_CA_CERT_HASH
 }
 
-# Функция для присоединения мастера к кластеру
+# Function to join master to cluster
 function joinMasterNode() {
     local NODE_NAME="$1"
     local NODE_IP="$2"
@@ -452,7 +452,7 @@ function joinMasterNode() {
     echo "Joining master node: ${NODE_NAME} (${NODE_IP})"
     echo "=========================================="
     
-    # Копирование сертификатов с первого мастера
+    # Copy certificates from first master
     local FIRST_MASTER_IP="${MASTER_IPS[0]}"
     echo "Copying certificates from ${MASTER_HOSTNAMES[0]}..."
     
@@ -490,9 +490,23 @@ function joinMasterNode() {
         }
     fi
     
-    # Присоединение мастера
+    # Join master
     local FIRST_MASTER_IP="${MASTER_IPS[0]}"
     echo "Joining ${NODE_NAME} as control-plane node..."
+    
+    # Clean up previous installation attempts (if any)
+    echo "Cleaning up any previous Kubernetes installation on ${NODE_NAME}..."
+    ssh -i "$PROJECT_ROOT/data/keys/rsa.key" \
+        -o StrictHostKeyChecking=accept-new \
+        -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=30 \
+        "ubuntu@${NODE_IP}" \
+        "sudo kubeadm reset -f 2>/dev/null || true; \
+         sudo rm -rf /etc/kubernetes/* 2>/dev/null || true; \
+         sudo rm -rf /var/lib/etcd/* 2>/dev/null || true; \
+         sudo systemctl stop kubelet 2>/dev/null || true; \
+         sudo systemctl stop containerd 2>/dev/null || true; \
+         sudo systemctl start containerd 2>/dev/null || true" || true
     
     ssh -t -i "$PROJECT_ROOT/data/keys/rsa.key" \
         -o StrictHostKeyChecking=accept-new \
@@ -507,7 +521,7 @@ function joinMasterNode() {
     echo "✓ Master node ${NODE_NAME} joined successfully"
 }
 
-# Функция для присоединения воркера к кластеру
+# Function to join worker to cluster
 function joinWorkerNode() {
     local NODE_NAME="$1"
     local NODE_IP="$2"
@@ -519,7 +533,7 @@ function joinWorkerNode() {
     
     local FIRST_MASTER_IP="${MASTER_IPS[0]}"
     
-    # Проверка наличия токена и hash
+    # Check if token and hash exist
     if [ -z "$KUBEADM_TOKEN" ] || [ -z "$KUBEADM_CA_CERT_HASH" ]; then
         echo "Error: KUBEADM_TOKEN or KUBEADM_CA_CERT_HASH is not set"
         echo "Re-obtaining join token from ${FIRST_MASTER_IP}..."
@@ -529,7 +543,7 @@ function joinWorkerNode() {
         }
     fi
     
-    # Проверка доступности мастера
+    # Check master accessibility
     echo "Checking master node accessibility (${FIRST_MASTER_IP}:6443)..."
     if ! nc -z "${FIRST_MASTER_IP}" 6443 2>/dev/null; then
         echo "Warning: Cannot reach master node on ${FIRST_MASTER_IP}:6443"
@@ -542,7 +556,7 @@ function joinWorkerNode() {
     fi
     echo "Master node is accessible"
     
-    # Проверка SSH доступности воркера
+    # Check SSH accessibility of worker
     echo "Checking SSH connectivity to ${NODE_NAME} (${NODE_IP})..."
     ssh-keygen -R "${NODE_IP}" -f /root/.ssh/known_hosts 2>/dev/null || true
     if ! nc -z "$NODE_IP" 22 2>/dev/null; then
@@ -555,7 +569,21 @@ function joinWorkerNode() {
     echo "Using token: ${KUBEADM_TOKEN:0:10}... (truncated)"
     echo "Using master: ${FIRST_MASTER_IP}:6443"
     
-    # Присоединение воркера с детальным логированием
+    # Clean up previous installation attempts (if any)
+    echo "Cleaning up any previous Kubernetes installation on ${NODE_NAME}..."
+    ssh -i "$PROJECT_ROOT/data/keys/rsa.key" \
+        -o StrictHostKeyChecking=accept-new \
+        -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=30 \
+        "ubuntu@${NODE_IP}" \
+        "sudo kubeadm reset -f 2>/dev/null || true; \
+         sudo rm -rf /etc/kubernetes/* 2>/dev/null || true; \
+         sudo rm -rf /var/lib/etcd/* 2>/dev/null || true; \
+         sudo systemctl stop kubelet 2>/dev/null || true; \
+         sudo systemctl stop containerd 2>/dev/null || true; \
+         sudo systemctl start containerd 2>/dev/null || true" || true
+    
+    # Join worker with detailed logging
     if ! ssh -t -i "$PROJECT_ROOT/data/keys/rsa.key" \
         -o StrictHostKeyChecking=accept-new \
         -o UserKnownHostsFile=/dev/null \
@@ -575,7 +603,7 @@ function joinWorkerNode() {
     
     echo "✓ Worker node ${NODE_NAME} joined successfully"
     
-    # Проверка статуса узла через несколько секунд
+    # Check node status after a few seconds
     sleep 5
     echo "Verifying node status..."
     if ssh -i "$PROJECT_ROOT/data/keys/rsa.key" \
@@ -590,7 +618,7 @@ function joinWorkerNode() {
     fi
 }
 
-# Функция для копирования kubeconfig на хост
+# Function to copy kubeconfig to host
 function copyKubeconfigToHost() {
     local FIRST_MASTER_IP="${MASTER_IPS[0]}"
     
@@ -611,8 +639,8 @@ function copyKubeconfigToHost() {
     }
     
     if [ -f "$PROJECT_ROOT/data/kubeconfig/config" ]; then
-        # Обновляем IP адрес в kubeconfig для доступа с хоста
-        # Используем первый мастер
+        # Update IP address in kubeconfig for host access
+        # Use first master
         if [ -n "$FIRST_MASTER_IP" ]; then
             sed -i.bak "s|server: https://127.0.0.1:6443|server: https://${FIRST_MASTER_IP}:6443|g" "$PROJECT_ROOT/data/kubeconfig/config" 2>/dev/null || true
             sed -i.bak "s|server: https://localhost:6443|server: https://${FIRST_MASTER_IP}:6443|g" "$PROJECT_ROOT/data/kubeconfig/config" 2>/dev/null || true
@@ -627,9 +655,9 @@ function copyKubeconfigToHost() {
     fi
 }
 
-# Главная функция установки multi-node кластера
+# Main function to install multi-node cluster
 function installMultiNodeCluster() {
-    # Инициализация узлов
+    # Initialize nodes
     initializeNodes
     
     echo "=========================================="
@@ -647,14 +675,14 @@ function installMultiNodeCluster() {
     done
     echo ""
     
-    # Проверка наличия необходимых утилит
+    # Check for required utilities
     if ! command -v nc &>/dev/null && ! command -v netcat &>/dev/null; then
         echo "Installing netcat..."
         [[ "$APT_UPDATED" != "1" ]] && apt update &>/dev/null && APT_UPDATED=1
         apt install -y netcat-openbsd &>/dev/null
     fi
     
-    # Проверка наличия образа Ubuntu
+    # Check for Ubuntu image
     if [ ! -f "/var/lib/libvirt/images/ubuntu-root.img" ]; then
         echo "Ubuntu image not found. Downloading..."
         if [ ! -f "$SCRIPT_DIR/kvm-install.sh" ]; then
@@ -668,7 +696,7 @@ function installMultiNodeCluster() {
         }
     fi
     
-    # Настройка сети libvirt для кластера
+    # Setup libvirt network for cluster
     echo ""
     echo "Setting up libvirt network for Kubernetes cluster..."
     if [ ! -f "$SCRIPT_DIR/setup-libvirt-network.sh" ]; then
@@ -676,51 +704,51 @@ function installMultiNodeCluster() {
         exit 1
     fi
     chmod +x "$SCRIPT_DIR/setup-libvirt-network.sh"
-    # Передаем количество узлов в скрипт настройки сети
+    # Pass number of nodes to network setup script
     NUM_MASTERS="$NUM_MASTERS" NUM_WORKERS="$NUM_WORKERS" "$SCRIPT_DIR/setup-libvirt-network.sh" || {
         echo "Error: Failed to setup libvirt network"
         exit 1
     }
     
-    # Проверка и остановка существующей VM ubuntu-noble (если запущена)
-    # чтобы избежать конфликтов блокировок при создании новых VM
+    # Check and stop existing ubuntu-noble VM (if running)
+    # to avoid lock conflicts when creating new VMs
     if virsh list --name | grep -q "^ubuntu-noble$"; then
         echo ""
         echo "Warning: VM ubuntu-noble is running. Stopping it to avoid disk lock conflicts..."
         virsh shutdown ubuntu-noble 2>/dev/null || true
         sleep 5
-        # Принудительное завершение если не остановилась
+        # Force shutdown if didn't stop
         if virsh list --name | grep -q "^ubuntu-noble$"; then
             virsh destroy ubuntu-noble 2>/dev/null || true
         fi
         echo "VM ubuntu-noble stopped"
     fi
     
-    # Создание всех VM узлов
+    # Create all VM nodes
     echo ""
     echo "Step 1: Creating VM nodes..."
     
-    # Создание мастеров
+    # Create masters
     for i in $(seq 0 $((NUM_MASTERS-1))); do
         createVMNode "${MASTER_NAMES[$i]}" "${MASTER_IPS[$i]}" "${MASTER_HOSTNAMES[$i]}" || exit 1
     done
     
-    # Создание воркеров
+    # Create workers
     for i in $(seq 0 $((NUM_WORKERS-1))); do
         createVMNode "${WORKER_NAMES[$i]}" "${WORKER_IPS[$i]}" "${WORKER_HOSTNAMES[$i]}" || exit 1
     done
     
-    # Установка Kubernetes на первом мастере
+    # Install Kubernetes on first master
     echo ""
     echo "Step 2: Installing Kubernetes on ${MASTER_HOSTNAMES[0]} (first master)..."
     installKubernetesOnNode "${MASTER_HOSTNAMES[0]}" "${MASTER_IPS[0]}" || exit 1
     
-    # Получение join token
+    # Get join token
     echo ""
     echo "Step 3: Getting join token from ${MASTER_HOSTNAMES[0]}..."
     getJoinToken "${MASTER_IPS[0]}" || exit 1
     
-    # Установка Kubernetes на остальных мастерах
+    # Install Kubernetes on remaining masters
     if [ "$NUM_MASTERS" -gt 1 ]; then
         echo ""
         echo "Step 4: Installing Kubernetes on additional master nodes..."
@@ -728,7 +756,7 @@ function installMultiNodeCluster() {
             installKubernetesOnNode "${MASTER_HOSTNAMES[$i]}" "${MASTER_IPS[$i]}" || exit 1
         done
         
-        # Присоединение мастеров к кластеру
+        # Join masters to cluster
         echo ""
         echo "Step 5: Joining master nodes to cluster..."
         for i in $(seq 1 $((NUM_MASTERS-1))); do
@@ -736,7 +764,7 @@ function installMultiNodeCluster() {
         done
     fi
     
-    # Установка Kubernetes на воркерах
+    # Install Kubernetes on workers
     if [ "$NUM_WORKERS" -gt 0 ]; then
         echo ""
         echo "Step 6: Installing Kubernetes on worker nodes..."
@@ -744,7 +772,7 @@ function installMultiNodeCluster() {
             installKubernetesOnNode "${WORKER_HOSTNAMES[$i]}" "${WORKER_IPS[$i]}" || exit 1
         done
         
-        # Присоединение воркеров к кластеру
+        # Join workers to cluster
         echo ""
         echo "Step 7: Joining worker nodes to cluster..."
         for i in $(seq 0 $((NUM_WORKERS-1))); do
@@ -752,7 +780,7 @@ function installMultiNodeCluster() {
         done
     fi
 
-    # Копирование kubeconfig на хост
+    # Copy kubeconfig to host
     echo ""
     echo "Step 8: Copying kubeconfig to host..."
     copyKubeconfigToHost

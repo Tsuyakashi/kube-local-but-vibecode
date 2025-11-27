@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Скрипт для создания и настройки сети libvirt для Kubernetes кластера
+# Script to create and configure libvirt network for Kubernetes cluster
 
 set -e
 set -o pipefail
@@ -8,17 +8,17 @@ set -o pipefail
 NETWORK_NAME="k8s-cluster"
 NETWORK_XML="/tmp/k8s-network.xml"
 
-# Проверка прав root
+# Check root privileges
 if [ "${EUID}" -ne 0 ]; then
     echo "Error: You need to run this script as root"
     exit 1
 fi
 
-# Получение количества узлов из переменных окружения (если переданы)
+# Get number of nodes from environment variables (if provided)
 NUM_MASTERS="${NUM_MASTERS:-3}"
 NUM_WORKERS="${NUM_WORKERS:-2}"
 
-# Валидация параметров
+# Validate parameters
 if ! [[ "$NUM_MASTERS" =~ ^[0-9]+$ ]] || [ "$NUM_MASTERS" -lt 1 ] || [ "$NUM_MASTERS" -gt 10 ]; then
     echo "Error: NUM_MASTERS must be between 1 and 10"
     exit 1
@@ -29,57 +29,57 @@ if ! [[ "$NUM_WORKERS" =~ ^[0-9]+$ ]] || [ "$NUM_WORKERS" -lt 0 ] || [ "$NUM_WOR
     exit 1
 fi
 
-# Функция для генерации MAC адреса
+# Function to generate MAC address
 function generateMAC() {
-    local NODE_TYPE="$1"  # "master" или "worker"
-    local INDEX="$2"      # номер узла (1-based)
+    local NODE_TYPE="$1"  # "master" or "worker"
+    local INDEX="$2"      # node number (1-based)
     
     if [ "$NODE_TYPE" = "master" ]; then
-        # Мастера: 52:54:00:44:44:11, 52:54:00:44:44:12, ...
+        # Masters: 52:54:00:44:44:11, 52:54:00:44:44:12, ...
         local OCTET=$((10 + INDEX))
         printf "52:54:00:44:44:%02x" "$OCTET"
     else
-        # Воркеры: 52:54:00:44:44:21, 52:54:00:44:44:22, ...
+        # Workers: 52:54:00:44:44:21, 52:54:00:44:44:22, ...
         local OCTET=$((20 + INDEX))
         printf "52:54:00:44:44:%02x" "$OCTET"
     fi
 }
 
-# Функция для генерации IP адреса
+# Function to generate IP address
 function generateIP() {
-    local NODE_TYPE="$1"  # "master" или "worker"
-    local INDEX="$2"      # номер узла (1-based)
+    local NODE_TYPE="$1"  # "master" or "worker"
+    local INDEX="$2"      # node number (1-based)
     
     if [ "$NODE_TYPE" = "master" ]; then
-        # Мастера: 10.44.44.11, 10.44.44.12, ...
+        # Masters: 10.44.44.11, 10.44.44.12, ...
         echo "10.44.44.$((10 + INDEX))"
     else
-        # Воркеры: 10.44.44.21, 10.44.44.22, ...
+        # Workers: 10.44.44.21, 10.44.44.22, ...
         echo "10.44.44.$((20 + INDEX))"
     fi
 }
 
-# Функция для генерации hostname
+# Function to generate hostname
 function generateHostname() {
-    local NODE_TYPE="$1"  # "master" или "worker"
-    local INDEX="$2"      # номер узла (1-based)
+    local NODE_TYPE="$1"  # "master" or "worker"
+    local INDEX="$2"      # node number (1-based)
     
     printf "%s%02d" "$NODE_TYPE" "$INDEX"
 }
 
-# Проверка существования сети
+# Check if network exists
 if virsh net-list --all --name | grep -q "^${NETWORK_NAME}$"; then
     echo "Network ${NETWORK_NAME} already exists"
     echo "Recreating network with updated DHCP reservations..."
     
-    # Остановка и удаление существующей сети
+    # Stop and remove existing network
     if virsh net-list --name | grep -q "^${NETWORK_NAME}$"; then
         virsh net-destroy "${NETWORK_NAME}" 2>/dev/null || true
     fi
     virsh net-undefine "${NETWORK_NAME}" 2>/dev/null || true
 fi
 
-# Создание XML конфигурации сети
+# Create XML network configuration
 cat > "$NETWORK_XML" <<EOF
 <network>
   <name>${NETWORK_NAME}</name>
@@ -92,7 +92,7 @@ cat > "$NETWORK_XML" <<EOF
       <range start='10.44.44.100' end='10.44.44.254'/>
 EOF
 
-# Добавление DHCP резерваций для мастеров
+# Add DHCP reservations for masters
 for i in $(seq 1 "$NUM_MASTERS"); do
     MAC=$(generateMAC "master" "$i")
     IP=$(generateIP "master" "$i")
@@ -100,7 +100,7 @@ for i in $(seq 1 "$NUM_MASTERS"); do
     echo "      <host mac='${MAC}' name='${HOSTNAME}' ip='${IP}'/>" >> "$NETWORK_XML"
 done
 
-# Добавление DHCP резерваций для воркеров
+# Add DHCP reservations for workers
 for i in $(seq 1 "$NUM_WORKERS"); do
     MAC=$(generateMAC "worker" "$i")
     IP=$(generateIP "worker" "$i")
@@ -108,7 +108,7 @@ for i in $(seq 1 "$NUM_WORKERS"); do
     echo "      <host mac='${MAC}' name='${HOSTNAME}' ip='${IP}'/>" >> "$NETWORK_XML"
 done
 
-# Закрытие XML
+# Close XML
 cat >> "$NETWORK_XML" <<EOF
     </dhcp>
   </ip>

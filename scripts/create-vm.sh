@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Скрипт для создания VM с заданным именем и IP
-# Использование: create-vm.sh <VM_NAME> <VM_IP> <VM_HOSTNAME>
+# Script to create VM with specified name and IP
+# Usage: create-vm.sh <VM_NAME> <VM_IP> <VM_HOSTNAME>
 
 set -e
 set -o pipefail
@@ -21,7 +21,7 @@ IMAGES_DIR="$PROJECT_ROOT/data/images"
 KEYS_DIR="$PROJECT_ROOT/data/keys"
 SEEDCONFIG_DIR="$PROJECT_ROOT/config/seedconfig"
 
-# Загрузка переменных для получения VM_PASSWORD
+# Load variables to get VM_PASSWORD
 if [ -f "$PROJECT_ROOT/config/variables.sh" ]; then
     source "$PROJECT_ROOT/config/variables.sh"
 fi
@@ -36,13 +36,13 @@ IMAGE_SIZE=20g
 VM_MEMORY=2048
 VM_CPUS=2
 
-# Проверка прав root
+# Check root privileges
 if [ "${EUID}" -ne 0 ]; then
     echo "Error: You need to run this script as root"
     exit 1
 fi
 
-# Проверка существования VM
+# Check if VM exists
 if virsh list --all --name | grep -q "^${VM_NAME}$"; then
     echo "VM ${VM_NAME} already exists, skipping creation"
     exit 0
@@ -50,7 +50,7 @@ fi
 
 echo "Creating VM: ${VM_NAME} with IP: ${VM_IP} and hostname: ${VM_HOSTNAME}"
 
-# 1. Получение образа (если еще не скачан)
+# 1. Get image (if not already downloaded)
 if [ ! -f "$IMAGES_DIR/$VM_IMAGE_TEMPLATE" ]; then
     echo "Downloading Ubuntu image..."
     mkdir -p "$IMAGES_DIR"
@@ -60,11 +60,11 @@ if [ ! -f "$IMAGES_DIR/$VM_IMAGE_TEMPLATE" ]; then
     fi
 fi
 
-# 2. Создание директорий
+# 2. Create directories
 mkdir -p /var/lib/libvirt/images/
 mkdir -p "$SEEDCONFIG_DIR"
 
-# 3. Копирование образа для этой VM
+# 3. Copy image for this VM
 VM_IMAGE_PATH="/var/lib/libvirt/images/${VM_NAME}-${VM_IMAGE}"
 if [ ! -f "$VM_IMAGE_PATH" ]; then
     echo "Copying image for ${VM_NAME}..."
@@ -72,14 +72,14 @@ if [ ! -f "$VM_IMAGE_PATH" ]; then
     qemu-img resize "$VM_IMAGE_PATH" "$IMAGE_SIZE" &>/dev/null
 fi
 
-# 4. Создание дополнительного диска
+# 4. Create additional disk
 DISK_NAME="${VM_NAME}-disk.qcow2"
 if [ ! -f "/var/lib/libvirt/images/$DISK_NAME" ]; then
     echo "Creating additional disk for ${VM_NAME}..."
     qemu-img create -f qcow2 "/var/lib/libvirt/images/$DISK_NAME" 25G &>/dev/null
 fi
 
-# 5. Генерация SSH ключей (если еще не созданы)
+# 5. Generate SSH keys (if not already created)
 if [ ! -f "$KEYS_DIR/rsa.key" ]; then
     echo "Generating SSH keys..."
     mkdir -p "$KEYS_DIR"
@@ -88,7 +88,7 @@ if [ ! -f "$KEYS_DIR/rsa.key" ]; then
     chmod 644 "$KEYS_DIR/rsa.key.pub"
 fi
 
-# 6. Создание cloud-init конфигурации с статическим IP
+# 6. Create cloud-init configuration with static IP
 echo "Creating cloud-init configuration for ${VM_NAME}..."
 cat > "$SEEDCONFIG_DIR/${VM_NAME}-user-data" <<EOF
 #cloud-config
@@ -124,7 +124,7 @@ instance-id: ${VM_NAME}
 local-hostname: ${VM_HOSTNAME}
 EOF
 
-# 7. Создание ISO для cloud-init
+# 7. Create ISO for cloud-init
 echo "Creating cloud-init ISO for ${VM_NAME}..."
 if ! genisoimage \
     -output "/var/lib/libvirt/images/${VM_NAME}-seed.iso" \
@@ -137,7 +137,7 @@ if ! genisoimage \
     exit 1
 fi
 
-# 8. Создание VM
+# 8. Create VM
 echo "Creating VM ${VM_NAME}..."
 if ! virt-install \
     --name "${VM_NAME}" \
@@ -157,7 +157,7 @@ if ! virt-install \
     exit 1
 fi
 
-# 9. Ожидание запуска VM
+# 9. Wait for VM to start
 echo "Waiting for VM ${VM_NAME} to start..."
 for i in {1..60}; do
     if virsh domifaddr "${VM_NAME}" 2>/dev/null | grep -q "ipv4"; then

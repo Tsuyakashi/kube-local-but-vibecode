@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Скрипт для пересоздания всех VM кластера Kubernetes
+# Script to recreate all VMs of Kubernetes cluster
 
 set -e
 set -o pipefail
@@ -8,13 +8,13 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Проверка прав root
+# Check root privileges
 if [ "${EUID}" -ne 0 ]; then
     echo "Error: You need to run this script as root"
     exit 1
 fi
 
-# Загрузка переменных
+# Load variables
 if [ ! -f "$PROJECT_ROOT/config/variables.sh" ]; then
     echo "Error: variables.sh not found"
     exit 1

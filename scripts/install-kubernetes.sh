@@ -1,19 +1,19 @@
 #!/bin/bash
 
-# Объединенный скрипт установки Kubernetes кластера
-# Запускается внутри VM, созданной kvm-install.sh
+# Unified script for Kubernetes cluster installation
+# Runs inside VM created by kvm-install.sh
 
 set -e
 set -o pipefail
 
-# Проверка прав root
+# Check root privileges
 if [ "${EUID}" -ne 0 ]; then
     echo "Error: You need to run this script as root"
     exit 1
 fi
 
-# Загрузка переменных
-# Скрипт запускается внутри VM, variables.sh должен быть скопирован в домашнюю директорию
+# Load variables
+# Script runs inside VM, variables.sh should be copied to home directory
 if [ ! -f ./variables.sh ]; then
     echo "Error: variables.sh not found in current directory"
     echo "Make sure variables.sh is copied to VM before running this script"
@@ -21,15 +21,15 @@ if [ ! -f ./variables.sh ]; then
 fi
 source ./variables.sh
 
-# Определение текущего хоста и IP
+# Determine current host and IP
 thisHostname=$(hostname)
-# Используем hostname -I для получения всех IP, берем первый не-loopback
+# Use hostname -I to get all IPs, take first non-loopback
 thisIP=$(hostname -I | awk '{for(i=1;i<=NF;i++) if($i !~ /^127\./) {print $i; exit}}')
-# Fallback если не нашли не-loopback IP
+# Fallback if didn't find non-loopback IP
 if [ -z "$thisIP" ]; then
 thisIP=$(hostname -I | awk '{print $1}')
 fi
-# Если все еще пусто, используем hostname -i
+# If still empty, use hostname -i
 if [ -z "$thisIP" ]; then
     thisIP=$(hostname -i 2>/dev/null || echo "127.0.0.1")
 fi
@@ -85,7 +85,7 @@ EOF
     modprobe overlay
     modprobe br_netfilter
     
-    # Настройка sysctl
+    # Configure sysctl
     cat <<EOF | tee /etc/sysctl.d/99-kubernetes-cri.conf >/dev/null
 net.bridge.bridge-nf-call-iptables=1
 net.ipv4.ip_forward=1
@@ -93,7 +93,7 @@ net.bridge.bridge-nf-call-ip6tables=1
 EOF
     sysctl --system &>/dev/null
     
-    # Загрузка и установка containerd
+    # Download and install containerd
     if [ ! -f /usr/local/bin/containerd ]; then
         echo "Downloading containerd ${containerdVersion}..."
         local max_attempts=3
@@ -127,7 +127,7 @@ EOF
         sed -i "s/SystemdCgroup = false/SystemdCgroup = true/g" /etc/containerd/config.toml
     fi
     
-    # Создание сервиса containerd
+    # Create containerd service
     cat > /etc/systemd/system/containerd.service <<EOF
 [Unit]
 Description=containerd container runtime
@@ -153,7 +153,7 @@ OOMScoreAdjust=-999
 WantedBy=multi-user.target
 EOF
     
-    # Установка runc
+    # Install runc
     if [ ! -f /usr/local/sbin/runc ]; then
         echo "Downloading runc ${runcVersion}..."
         if ! curl -L --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 5 \
@@ -167,7 +167,7 @@ EOF
         echo "Runc installed successfully"
     fi
     
-    # Установка CNI плагинов
+    # Install CNI plugins
     if [ ! -d /opt/cni/bin ]; then
         echo "Downloading CNI plugins ${cniPluginsVersion}..."
         if ! curl -L --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 5 \
@@ -182,7 +182,7 @@ EOF
         echo "CNI plugins installed successfully"
     fi
     
-    # Запуск containerd
+    # Start containerd
     systemctl daemon-reload
     systemctl enable --now containerd
     systemctl restart containerd
@@ -220,7 +220,7 @@ function installEtcd() {
     
     apt install -y curl &>/dev/null
     
-    # Загрузка и установка etcd
+        # Download and install etcd
     if [ ! -f /usr/local/bin/etcd ]; then
         echo "Downloading etcd ${etcdVersion}..."
         if ! curl -L --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 5 \
@@ -240,7 +240,7 @@ function installEtcd() {
 ETCD_INITIAL_CLUSTER_TOKEN=${etcdToken}
 EOF
     
-    # Создание сервиса etcd
+        # Create etcd service
     serviceFilePath=/etc/systemd/system/etcd.service
     cat > $serviceFilePath <<EOF
 [Unit]
@@ -299,7 +299,7 @@ function installHaproxy() {
     # В Ubuntu 24.04 gnupg2 заменен на gnupg
     DEBIAN_FRONTEND=noninteractive apt install -y apt-transport-https curl gnupg apparmor apparmor-utils ca-certificates
     
-    # Установка HAProxy из backports
+        # Install HAProxy from backports
     if ! dpkg -s haproxy &>/dev/null; then
         curl https://haproxy.debian.net/bernat.debian.org.gpg \
             | gpg --dearmor > /usr/share/keyrings/haproxy.debian.net.gpg
@@ -311,7 +311,7 @@ function installHaproxy() {
         apt install -y haproxy=2.5.* &>/dev/null
     fi
     
-    # Настройка HAProxy
+        # Configure HAProxy
     cat > /etc/haproxy/haproxy.cfg <<EOF
 global
 	log /dev/log	local0
@@ -409,7 +409,7 @@ function installKubernetes() {
             fi
         fi
         
-        # Попытка 2: pkgs.k8s.io для версии 1.28 (fallback)
+                # Attempt 2: pkgs.k8s.io for version 1.28 (fallback)
         if [ "$GPG_KEY_ADDED" != true ] && curl -fsSL "https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key" -o /tmp/k8s-release.key 2>/dev/null; then
             if gpg --dearmor < /tmp/k8s-release.key > "$GPG_KEY_FILE" 2>/dev/null; then
                 echo "✓ GPG key added for Kubernetes 1.28 (fallback)"
@@ -419,7 +419,7 @@ function installKubernetes() {
             fi
         fi
         
-        # Попытка 3: pkgs.k8s.io без версии (latest)
+                # Attempt 3: pkgs.k8s.io without version (latest)
         if [ "$GPG_KEY_ADDED" != true ] && curl -fsSL "https://pkgs.k8s.io/core:/stable:/deb/Release.key" -o /tmp/k8s-release.key 2>/dev/null; then
             if gpg --dearmor < /tmp/k8s-release.key > "$GPG_KEY_FILE" 2>/dev/null; then
                 echo "✓ GPG key added for Kubernetes (latest)"
@@ -429,7 +429,7 @@ function installKubernetes() {
             fi
         fi
         
-        # Попытка 4: старый метод через packages.cloud.google.com
+                # Attempt 4: old method via packages.cloud.google.com
         if [ "$GPG_KEY_ADDED" != true ] && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg -o /tmp/k8s-release.key 2>/dev/null; then
             if gpg --dearmor < /tmp/k8s-release.key > /usr/share/keyrings/kubernetes-archive-keyring.gpg 2>/dev/null; then
                 echo "Warning: Using legacy repository (may not work)"
@@ -439,7 +439,7 @@ function installKubernetes() {
             fi
         fi
         
-        # Очистка временного файла
+                # Clean up temporary file
         rm -f /tmp/k8s-release.key
         
         if [ "$GPG_KEY_ADDED" != true ]; then
@@ -507,7 +507,7 @@ function installKubernetes() {
         echo "✓ Kubernetes components installed successfully"
     else
         echo "Kubernetes components already installed"
-        # Определяем установленную версию
+        # Determine installed version
         INSTALLED_K8S_VERSION=$(dpkg -s kubelet 2>/dev/null | grep Version | cut -d' ' -f2 | cut -d'-' -f1)
         if [ -n "$INSTALLED_K8S_VERSION" ]; then
             echo "Installed Kubernetes version: ${INSTALLED_K8S_VERSION}"
@@ -517,12 +517,12 @@ function installKubernetes() {
 }
 
 # ============================================
-# 6. Инициализация Master узлов
+# 6. Initialize Master nodes
 # ============================================
 function initializeMasterNode() {
     echo "[6/7] Initializing master node..."
     
-    # Определение режима работы: multi-node или single-node
+    # Determine operation mode: multi-node or single-node
     local is_master01=false
     local is_master=false
     
@@ -568,7 +568,7 @@ networking:
   dnsDomain: "cluster.local"
 EOF
     else
-        # Single-node конфигурация (если VM не соответствует ни одному из master IP)
+        # Single-node configuration (if VM doesn't match any master IP)
         echo "Warning: VM IP ($thisIP) does not match any configured master IP"
         echo "Setting up as single-node cluster..."
         cat > /tmp/kubeadm-init.yaml <<EOF
@@ -733,12 +733,12 @@ EOF
 }
 
 # ============================================
-# 7. Присоединение Worker узлов
+# 7. Join Worker nodes
 # ============================================
 function joinWorkerNode() {
     echo "[7/7] Joining worker node..."
     
-    # Проверка, является ли узел worker
+    # Check if node is worker
     local is_master=false
     if [[ "$thisIP" == "$master01_IP" ]] || \
        [[ "$thisIP" == "$master02_IP" ]] || \
