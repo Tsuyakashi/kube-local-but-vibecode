@@ -24,8 +24,8 @@ etcdVersion=3.5.3
 containerdVersion=1.6.2
 runcVersion=1.1.1
 cniPluginsVersion=1.1.1
-kubernetesVersion=1.23.6
-calicoVersion=3.22
+kubernetesVersion=1.28.15
+calicoVersion=3.27
 
 # Пространство адресов подов. Зависит от CNI-плагина. В данном случае используется Calico.
 podSubnet=192.168.0.0/16

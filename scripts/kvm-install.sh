@@ -2,6 +2,13 @@
 
 set -e
 
+# Определение путей
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+IMAGES_DIR="$PROJECT_ROOT/data/images"
+KEYS_DIR="$PROJECT_ROOT/data/keys"
+SEEDCONFIG_DIR="$PROJECT_ROOT/config/seedconfig"
+
 VM_NAME="ubuntu-noble"
 VM_USER=ubuntu
 VM_IMAGE=ubuntu-root.img
@@ -155,9 +162,9 @@ function checkPacks() {
 
 function getVMImage() {
     echo "[KVM INSTALLER]: Getting $VM_NAME image"
-    if [ ! -f "./images/$VM_IMAGE_TEMPLATE" ]; then
-            mkdir -p images/
-        if ! wget -O "./images/$VM_IMAGE_TEMPLATE" "$VM_IMAGE_LINK"; then
+    if [ ! -f "$IMAGES_DIR/$VM_IMAGE_TEMPLATE" ]; then
+            mkdir -p "$IMAGES_DIR"
+        if ! wget -O "$IMAGES_DIR/$VM_IMAGE_TEMPLATE" "$VM_IMAGE_LINK"; then
             echo "[KVM INSTALLER]: Failed to download image"
             return 1
         fi
@@ -176,7 +183,7 @@ function cpImage() {
     echo "[KVM INSTALLER]: Copying image"
     if [ ! -f "/var/lib/libvirt/images/$VM_IMAGE" ]; then
         sudo cp \
-            "./images/$VM_IMAGE_TEMPLATE" \
+            "$IMAGES_DIR/$VM_IMAGE_TEMPLATE" \
             "/var/lib/libvirt/images/$VM_IMAGE"
     else
         echo "[KVM INSTALLER]: Image already exists at /var/lib/libvirt/images/$VM_IMAGE"
@@ -202,14 +209,14 @@ function createDiskB() {
 }
 
 function keysGen() {
-    if [ ! -f "./keys/rsa.key" ]; then
+    if [ ! -f "$KEYS_DIR/rsa.key" ]; then
         echo "[KVM INSTALLER]: Generating rsa keys"
-        if [ ! -d "./keys" ]; then
-            mkdir keys/
+        if [ ! -d "$KEYS_DIR" ]; then
+            mkdir -p "$KEYS_DIR"
         fi
-        ssh-keygen -f ./keys/rsa.key -t rsa -N "" > /dev/null
-        chmod 600 ./keys/rsa.key
-        chmod 644 ./keys/rsa.key.pub
+        ssh-keygen -f "$KEYS_DIR/rsa.key" -t rsa -N "" > /dev/null
+        chmod 600 "$KEYS_DIR/rsa.key"
+        chmod 644 "$KEYS_DIR/rsa.key.pub"
     else
         echo "[KVM INSTALLER]: Keys already exist"
     fi
@@ -218,11 +225,11 @@ function keysGen() {
 
 function seedConfigGen() {
     echo "[KVM INSTALLER]: Creating seed config"
-    if [ ! -d "./seedconfig" ]; then
-        mkdir seedconfig/
+    if [ ! -d "$SEEDCONFIG_DIR" ]; then
+        mkdir -p "$SEEDCONFIG_DIR"
     fi
-    if [ ! -f "./seedconfig/user-data" ]; then
-        tee seedconfig/user-data > /dev/null <<EOF
+    if [ ! -f "$SEEDCONFIG_DIR/user-data" ]; then
+        tee "$SEEDCONFIG_DIR/user-data" > /dev/null <<EOF
 #cloud-config
 #vim:syntax=yaml
 users:
@@ -233,14 +240,14 @@ users:
     groups: sudo, admin
     shell: /bin/bash
     ssh_authorized_keys:
-      - $(cat ./keys/rsa.key.pub)
+      - $(cat "$KEYS_DIR/rsa.key.pub")
 EOF
     else 
         echo "[KVM INSTALLER]: user-data already exists"
     fi
     
-    if [ ! -f "./seedconfig/meta-data" ]; then
-        tee seedconfig/meta-data > /dev/null <<EOF
+    if [ ! -f "$SEEDCONFIG_DIR/meta-data" ]; then
+        tee "$SEEDCONFIG_DIR/meta-data" > /dev/null <<EOF
 #cloud-config
 local-hostname: $VM_NAME.local
 EOF
@@ -251,7 +258,7 @@ EOF
 
 function mkIso() {
     echo "[KVM INSTALLER]: Making iso"
-    if [ ! -f "./seedconfig/user-data" ] || [ ! -f "./seedconfig/meta-data" ]; then
+    if [ ! -f "$SEEDCONFIG_DIR/user-data" ] || [ ! -f "$SEEDCONFIG_DIR/meta-data" ]; then
         echo "[KVM INSTALLER]: seedconfig files not found. Run seedConfigGen first."
         return 1
     fi
@@ -261,8 +268,8 @@ function mkIso() {
         -volid cidata \
         -joliet \
         -rock \
-        ./seedconfig/user-data \
-        ./seedconfig/meta-data &>/dev/null; then
+        "$SEEDCONFIG_DIR/user-data" \
+        "$SEEDCONFIG_DIR/meta-data" &>/dev/null; then
         echo "[KVM INSTALLER]: Failed to create ISO"
         return 1
     fi

@@ -1,3 +1,15 @@
-images/
-keys/
-seedconfig/
+# Data directories
+data/images/
+data/keys/
+
+# Config directories (keep structure but ignore generated files)
+config/seedconfig/user-data
+config/seedconfig/meta-data
+
+# Log files
+*.log
+install.log
+
+# Temporary installation reports (keep INSTALLATION_REPORT_FULL.md)
+INSTALLATION_REPORT.md
+INSTALLATION_SUCCESS.md
